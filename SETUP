@@ -39,6 +39,23 @@ gcloud compute ssh speech <<"EOF"
 set -ex
 echo '$yn = YES | NO;' > gram
 echo '( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )' >> gram
+tee make_words_mlf.rb <<EOF2
+puts '#!MLF!#'
+Dir.glob('/home/daniel/waves_yesno/*.wav') do |path|
+  filename = path.split('/').last
+  puts "\"*/#{filename}\""
+  filename.gsub(/\.wav/, '').split('_').each do |part|
+    puts ({'0' => 'NO', '1' => 'YES'})[part]
+  end
+  puts '.'
+end
+EOF2
+ruby make_words_mlf.rb > words.mlf
+
+tee gram <<EOF2
+$yn = YES | NO;
+( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )
+EOF2
 htk/HTKTools/HParse gram wdnet
 echo 'SENT-START [] sil' > dict
 echo 'SENT-END [] sil' >> dict
