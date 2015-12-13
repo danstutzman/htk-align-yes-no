@@ -40,4 +40,8 @@ set -ex
 echo '$yn = YES | NO;' > gram
 echo '( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )' >> gram
 htk/HTKTools/HParse gram wdnet
+echo 'SENT-START [] sil' > dict
+echo 'SENT-END [] sil' >> dict
+echo 'YES y' >> dict
+echo 'NO n' >> dict
 EOF
