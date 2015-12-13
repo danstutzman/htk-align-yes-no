@@ -17,6 +17,7 @@ gcloud compute ssh speech 'sudo apt-get install -y mosh'
 gcloud compute copy-files ~/dev/htk/HTK-3.4.1.tar.gz speech:HTK-3.4.1.tar.gz
 
 gcloud compute ssh speech <<EOF
+set -ex
 sudo mkdir -p /usr/local/bin.linux
 sudo chown daniel:daniel /usr/local/bin.linux
 sudo apt-get install -y build-essential libc6-dev-i386 libx11-dev ruby
@@ -26,4 +27,17 @@ rm configure.ac
 CFLAGS="-L/usr/lib/x86_64-linux-gnu -m64" ./configure --enable-trad-htk
 ruby -i -pe 'gsub /^        if/, "\tif"' HLMTools/Makefile
 make all
+EOF
+
+gcloud compute ssh speech <<EOF
+set -ex
+wget http://www.openslr.org/resources/1/waves_yesno.tar.gz
+tar -xvzf waves_yesno.tar.gz
+EOF
+
+gcloud compute ssh speech <<"EOF"
+set -ex
+echo '$yn = YES | NO;' > gram
+echo '( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )' >> gram
+htk/HTKTools/HParse gram wdnet
 EOF
