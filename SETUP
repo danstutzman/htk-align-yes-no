@@ -59,4 +59,26 @@ YES y
 NO n
 EOF2
 
+tee config <<EOF2
+SOURCEFORMAT = WAV
+# Coding parameters
+TARGETKIND = MFCC_0
+TARGETRATE = 100000.0
+SAVECOMPRESSED = T
+SAVEWITHCRC = T
+WINDOWSIZE = 250000.0
+USEHAMMING = T
+PREEMCOEF = 0.97
+NUMCHANS = 26
+CEPLIFTER = 22
+NUMCEPS = 12
+ENORMALISE = F
+EOF2
+
+rm -f coretr.scp
+for WAV in /home/daniel/waves_yesno/*.wav; do
+  MFC=`echo $WAV | sed 's/wav$/mfc/'`
+  echo "$WAV $MFC" >> coretr.scp
+done
+htk/HTKTools/HCopy -T 1 -C config -S coretr.scp
 EOF
