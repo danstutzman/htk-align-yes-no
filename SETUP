@@ -10,7 +10,7 @@ gcloud compute instances create speech \
   --image ubuntu-15-10 \
   --machine-type n1-standard-1
 
-gcloud compute ssh speech 'shutdown +240 -P'
+gcloud compute ssh speech 'sudo shutdown +2400 -P'
 
 gcloud compute ssh speech 'sudo apt-get install -y mosh'
 
