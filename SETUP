@@ -38,7 +38,7 @@ tee make_words_mlf.rb <<EOF2
 puts '#!MLF!#'
 Dir.glob('/home/daniel/waves_yesno/*.wav') do |path|
   filename = path.split('/').last
-  puts "\"*/#{filename}\""
+  puts "\"*/#{filename.gsub(/\.wav/, '.lab')}\""
   filename.gsub(/\.wav/, '').split('_').each do |part|
     puts ({'0' => 'NO', '1' => 'YES'})[part]
   end
@@ -47,19 +47,45 @@ end
 EOF2
 ruby make_words_mlf.rb > words.mlf
 
+tee mkphones0.led <<EOF2
+EX
+IS sil sil
+DE sp
+EOF2
+htk/HTKTools/HLEd -l '*' -d dict -i phones0.mlf mkphones0.led words.mlf
+
 tee gram <<EOF2
 $yn = YES | NO;
 ( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )
 EOF2
 htk/HTKTools/HParse gram wdnet
 tee dict <<EOF2
-SENT-START [] sil
-SENT-END [] sil
-YES y
 NO n
+SENT-END [] sil
+SENT-START [] sil
+YES y
+silence sil
+EOF2
+# Must be alphabetical order
+
+tee wlist <<EOF2
+NO
+YES
 EOF2
 
-tee config <<EOF2
+# create a new dictionary called dict2 by searching the source dict
+# dict to find pronunciations for each word in wlist
+# the file we really want to generate is monophones1
+htk/HTKTools/HDMan -m -w wlist -n monophones1 -l dlog dict2 dict
+# dlog contains various statistics about the constructed dictionary.
+# In particular, it indicates if there are words missing.
+cat dlog
+rm dlog
+rm dict2
+echo 'sil' >> monophones1
+echo 'sp' >> monophones1 # short pause
+
+tee config1 <<EOF2
 SOURCEFORMAT = WAV
 # Coding parameters
 TARGETKIND = MFCC_0
@@ -80,5 +106,170 @@ for WAV in /home/daniel/waves_yesno/*.wav; do
   MFC=`echo $WAV | sed 's/wav$/mfc/'`
   echo "$WAV $MFC" >> coretr.scp
 done
-htk/HTKTools/HCopy -T 1 -C config -S coretr.scp
+htk/HTKTools/HCopy -T 1 -C config1 -S coretr.scp
+
+tee >proto <<EOF2
+~o <VecSize> 39 <MFCC_0_D_A>
+~h "proto"
+<BeginHMM>
+ <NumStates> 5
+ <State> 2
+    <Mean> 39
+      0.0 0.0 0.0 ...
+    <Variance> 39
+      1.0 1.0 1.0 ...
+ <State> 3
+    <Mean> 39
+      0.0 0.0 0.0 ...
+    <Variance> 39
+      1.0 1.0 1.0 ...
+ <State> 4
+    <Mean> 39
+      0.0 0.0 0.0 ...
+    <Variance> 39
+      1.0 1.0 1.0 ...
+ <TransP> 5
+  0.0 1.0 0.0 0.0 0.0
+  0.0 0.6 0.4 0.0 0.0
+  0.0 0.0 0.6 0.4 0.0
+  0.0 0.0 0.0 0.7 0.3
+  0.0 0.0 0.0 0.0 0.0
+<EndHMM>
+EOF2
+
+tee make_hmm_prototype.py <<EOF2
+import os
+
+samplesize=39
+featuretype="MFCC_0_D_A"
+outf = open('proto','w')
+
+print >> outf, "~o <vecSize> %d <%s>" % (samplesize,featuretype)
+print >> outf, '~h "proto"'
+print >> outf, "<BEGINHMM>"
+print >> outf, " <NUMSTATES> 5"
+
+means = []
+vars = []
+for i in range(samplesize):
+    means.append(str(0.0))
+    vars.append(str(1.0))
+for index in range(2,5):
+   print >> outf, " <STATE> %d" % index
+   print >> outf, "  <MEAN> %d" % samplesize
+   print >> outf, ' '.join(means)
+   print >> outf, "  <VARIANCE> %d" % samplesize
+   print >> outf, ' '.join(vars)
+
+print >> outf,  " <TRANSP> 5"
+print >> outf,   "  0.0 1.0 0.0 0.0 0.0"
+print >> outf,   "  0.0 0.6 0.4 0.0 0.0"
+print >> outf,   "  0.0 0.0 0.6 0.4 0.0"
+print >> outf,   "  0.0 0.0 0.0 0.7 0.3"
+print >> outf,   "  0.0 0.0 0.0 0.0 0.0"
+print >> outf,   "<ENDHMM>"
+outf.close();
+EOF2
+python make_hmm_prototype.py
+ls -1 waves_yesno/*.wav > train.scp
+mkdir -p hmm0
+cat config1 | sed 's/TARGETKIND = MFCC_0/TARGETKIND = MFCC_0_D_A/' > config2
+htk/HTKTools/HCompV -C config2 -f 0.01 -m -S train.scp -M hmm0 proto
+# Above command: will create a new version of proto in the directory hmm0 
+# in which the zero means and unit variances above have been replaced by 
+# the global speech means and variances.
+
+tee monophones0 <<EOF2
+n
+sil
+y
+EOF2
+
+echo '~o <MFCC_0_D_A> <VecSize> 39' > hmm0/macros
+cat hmm0/vFloors >> hmm0/macros
+
+tee make_hmmdefs.rb <<EOF2
+prototype = File.read('hmm0/proto').match(/(<BEGINHMM>.*<ENDHMM>\n)/im)
+phones = File.read('monophones0').split("\n").map { |line| line.strip }
+File.open('hmm0/hmmdefs', 'w') do |file|
+  phones.each do |phone|
+    file.write "~h \"#{phone}\"\n"
+    file.write prototype
+    file.write "\n"
+  end
+end
+EOF2
+ruby make_hmmdefs.rb
+
+mkdir -p hmm1
+# set pruning threshold to 250.0
+# but if re-estimation fails, increase threshold by 150.0 and reprocess
+# unless pruning limit of 1000.0 is exceeded, in which case error out
+htk/HTKTools/HERest -C config2 -I phones0.mlf -t 250.0 150.0 1000.0 \
+  -S train.scp -H hmm0/macros -H hmm0/hmmdefs -M hmm1 monophones0
+
+mkdir -p hmm2
+htk/HTKTools/HERest -C config2 -I phones0.mlf -t 250.0 150.0 1000.0 \
+  -S train.scp -H hmm0/macros -H hmm1/hmmdefs -M hmm2 monophones0
+
+mkdir -p hmm3
+htk/HTKTools/HERest -C config2 -I phones0.mlf -t 250.0 150.0 1000.0 \
+  -S train.scp -H hmm0/macros -H hmm2/hmmdefs -M hmm3 monophones0
+
+# Fix the silence model: see http://www.voxforge.org/home/dev/acousticmodels/linux/create/htkjulius/tutorial/monophones/step-7
+tee make_sp_model.rb <<EOF2
+def replace! haystack, needle, replacement
+  raise "Couldn't find #{needle} in #{haystack}" unless haystack.match(needle)
+  haystack.gsub! needle, replacement
+end
+
+sp_model = File.read('hmm3/hmmdefs').match(/(~h "sil"\n<BEGINHMM>.*<ENDHMM>\n)/im)[0]
+replace! sp_model, /^~h "sil"$/, "~h \"sp\""
+replace! sp_model, /^<NUMSTATES> 5$/, "<NUMSTATES> 3"
+replace! sp_model,
+  /<STATE> 2\n<MEAN>(.*?)\n<VARIANCE>(.*?)<GCONST>(.*?)\n<STATE> 3\n/im,
+  "<STATE> 3\n"
+replace! sp_model,
+  /<STATE> 4\n<MEAN>(.*?)\n<VARIANCE>(.*?)<GCONST>(.*?)\n<TRANSP> 5\n/im,
+  "<TRANSP> 5\n"
+replace! sp_model, /<STATE> 3\n/, "<STATE> 2\n"
+replace! sp_model,
+  /<TRANSP> 5\n*(.*?)<ENDHMM>/im,
+  "<TRANSP> 3\n0.0 1.0 0.0\n0.0 0.9 0.1\n0.0 0.0 0.0\n<ENDHMM>"
+puts sp_model
+EOF2
+ruby make_sp_model.rb > sp_model
+
+tee >sil.hed <<EOF2
+AT 2 4 0.2 {sil.transP}
+AT 4 2 0.2 {sil.transP}
+AT 1 3 0.3 {sp.transP}
+TI silst {sil.state[3],sp.state[2]}
+EOF2
+
+mkdir -p hmm4
+cat hmm3/hmmdefs sp_model > hmm4/hmmdefs
+cp hmm3/macros hmm4/macros
+mkdir -p hmm5
+htk/HTKTools/HHEd -H hmm4/macros -H hmm4/hmmdefs -M hmm5 sil.hed monophones1
+
+tee >mkphones1.led <<EOF2
+EX
+IS sil sil
+EOF2
+htk/HTKTools/HLEd -l '*' -d dict -i phones1.mlf mkphones1.led words.mlf
+
+mkdir -p hmm6
+htk/HTKTools/HERest -A -D -T 1 -C config2 -I phones1.mlf -t 250.0 150.0 3000.0 -S train.scp -H hmm5/macros -H  hmm5/hmmdefs -M hmm6 monophones1
+
+mkdir -p hmm7
+htk/HTKTools/HERest -A -D -T 1 -C config2 -I phones1.mlf -t 250.0 150.0 3000.0 -S train.scp -H hmm6/macros -H hmm6/hmmdefs -M hmm7 monophones1
+
+# Create aligned.mlf
+htk/HTKTools/HVite -A -D -T 1 -l '*' -o SWT -b SENT-END -C config2 -H hmm7/macros -H hmm7/hmmdefs -i aligned.mlf -m -t 250.0 150.0 1000.0 -y lab -a -I words.mlf -S train.scp dict monophones1
+#htk/HTKTools/HVite -l '*' -o SWT -b silence -C config2 -a -H hmm7/macros \
+#  -H hmm7/hmmdefs -i aligned.mlf -m -t 250.0 -y lab \
+#  -I words.mlf -S train.scp  dict monophones1
+
+
 EOF
