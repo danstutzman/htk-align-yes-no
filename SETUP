@@ -33,12 +33,7 @@ gcloud compute ssh speech <<EOF
 set -ex
 wget http://www.openslr.org/resources/1/waves_yesno.tar.gz
 tar -xvzf waves_yesno.tar.gz
-EOF
 
-gcloud compute ssh speech <<"EOF"
-set -ex
-echo '$yn = YES | NO;' > gram
-echo '( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )' >> gram
 tee make_words_mlf.rb <<EOF2
 puts '#!MLF!#'
 Dir.glob('/home/daniel/waves_yesno/*.wav') do |path|
@@ -57,8 +52,11 @@ $yn = YES | NO;
 ( SENT-START $yn $yn $yn $yn $yn $yn $yn $yn SENT-END )
 EOF2
 htk/HTKTools/HParse gram wdnet
-echo 'SENT-START [] sil' > dict
-echo 'SENT-END [] sil' >> dict
-echo 'YES y' >> dict
-echo 'NO n' >> dict
+tee dict <<EOF2
+SENT-START [] sil
+SENT-END [] sil
+YES y
+NO n
+EOF2
+
 EOF
