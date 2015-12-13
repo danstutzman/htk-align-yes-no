@@ -1,0 +1,29 @@
+Run once per project:
+gcloud compute firewall-rules create mosh --allow udp:60001-60010
+
+Run once per workstation:
+gcloud config set compute/zone us-central1-b
+gcloud config set project speech-danstutzman
+---------------------
+
+gcloud compute instances create speech \
+  --image ubuntu-15-10 \
+  --machine-type n1-standard-1
+
+gcloud compute ssh speech 'shutdown +240 -P'
+
+gcloud compute ssh speech 'sudo apt-get install -y mosh'
+
+gcloud compute copy-files ~/dev/htk/HTK-3.4.1.tar.gz speech:HTK-3.4.1.tar.gz
+
+gcloud compute ssh speech <<EOF
+sudo mkdir -p /usr/local/bin.linux
+sudo chown daniel:daniel /usr/local/bin.linux
+sudo apt-get install -y build-essential libc6-dev-i386 libx11-dev ruby
+tar xvzf HTK-3.4.1.tar.gz
+cd htk
+rm configure.ac
+CFLAGS="-L/usr/lib/x86_64-linux-gnu -m64" ./configure --enable-trad-htk
+ruby -i -pe 'gsub /^        if/, "\tif"' HLMTools/Makefile
+make all
+EOF
